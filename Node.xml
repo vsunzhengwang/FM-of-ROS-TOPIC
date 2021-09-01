@@ -1,0 +1,969 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC '-//Uppaal Team//DTD Flat System 1.1//EN' 'http://www.it.uu.se/research/group/darts/uppaal/flat-1_2.dtd'>
+<nta>
+	<declaration>// Place global declarations here.
+//int[0,4] action;//1:advertise;2:subscribe;3:publish;4:spin
+const int Na = 5;//actions+1
+const int Nt = 2;//topics topic1:1, topic2:2
+const int Nn = 3;//nodes NodeA:1, NodeB:2, NodeC:3
+
+struct
+{
+    int pubtopic_status;//0：unregistered，1：registered
+    int subtopic_status;
+    int pubnodes[Nn+1];//[Nn+1]:pubnodes[0] is used to store node index
+    int subnodes[Nn+1];
+}table[Nt+1];//sort by topic name manually。tabel[1] record info of topic1
+
+int pubtopiclist[Nn+1][Nt];
+int subtopiclist[Nn+1][Nt];
+int contopiclistS[Nn+1][Nt];
+int contopiclistP[Nn+1][Nt];
+int flag_p[Nn+1],flag_s[Nn+1],flag_c[Nn+1];
+
+//int pubtopics[Nt],subtopics[Nt];
+//int pubnodes[Nt][Nn+1],subnodes[Nt][Nn+1];//[Nn+1]:第0个元素用来存放当前node索引
+
+int Qp[Nn+1][Nt+1];//队列状态 0:未生成；1：生成；2：消息入队
+int Qs[Nn+1][Nt+1];
+int msg[Nt+1];//暂时不区分msg来自哪个node，只区分是哪个topic的消息    //msg表示消息状态 0:未序列化；1：序列化且入发送队列；2：发送中；3：读取中；4：入接收队列且反序列化；5：使用中
+//int Qp_A1=0,Qs_1;//Qp表示队列状态 0:未生成；1：生成；2：消息入队
+//int msg_1=0;//msg表示消息状态 0:未序列化；1：序列化；2：入发送队列； 3：入接收队列
+
+
+bool serialize[Nt+1],nocopy[Nt+1];
+chan advertise[Nn+1][Nt+1],subscribe[Nn+1][Nt+1],publish[Nn+1][Nt+1],spinOnce[Nt+1],registerPublisher[Nn+1][Nt+1],registerSubscriber[Nn+1][Nt+1],addLocalConnection[Nn+1][Nt+1],pub_publish[Nn+1][Nt+1],pub_enqueue[Nn+1][Nt+1],do_nocopy[Nt+1];
+//chan publisherUpdate[Nn][Nt];新增发布节点时不方便更新,所以去掉[Nn]，让跟该topic相关的所有订阅者都去update
+chan publisherUpdate[Nn+1][Nt+1];
+chan xmlrpcRequest[Nn+1][Nn+1][Nt+1];//第一维代表请求节点(src)，第二维代表被请求节点(dest)，节点1~n
+chan agree[Nn+1][Nn+1][Nt+1];//第一维代表回复节点(src)，第二维代表被回复节点(dest)，节点1~n
+chan negotiateDone[Nn+1][Nn+1];
+chan msg_transport[Nt+1],msg_arrive[Nn+1][Nt+1];
+chan handleMsg[Nn+1][Nt+1];
+
+</declaration>
+	<template>
+		<name>Master</name>
+		<declaration>//typedef int[0,2] rgstpub;//注册发布    1:NodeA; 2:NodeB; 3:NodeC
+//typedef int[0,2] rgstsub;//注册订阅    1:NodeA; 2:NodeB; 3:NodeC
+int pubtopic,subtopic,node;
+//int pubtopics[Nt],subtopics[Nt];
+//int pubnodes[Nt][Nn+1],subnodes[Nt][Nn+1];
+int curtid,curnid;
+
+
+void Initialize(){
+    for(a:int[0,Nt])
+    {
+        table[a].pubtopic_status=0;
+        table[a].subtopic_status=0;
+        for(b:int[0,Nn])
+        {
+            table[a].pubnodes[b]=0;
+            table[a].subnodes[b]=0;
+        }
+    }
+}
+
+bool Belongs(int e,int list[Nt]){
+     for(i : int[0,Nt - 1])
+    {
+        if(e==list[i])
+        return true;
+    }
+    return false;
+}
+
+
+void ExecuteP(int n,int t){
+    node=n;
+    pubtopic=t;
+}
+
+void ExecuteS(int n,int t){
+    node=n;
+    subtopic=t;
+}
+
+
+void AddPubTopic(){
+    table[pubtopic].pubtopic_status=1;
+}
+
+void AddSubTopic(){
+    table[subtopic].subtopic_status=1;
+}
+
+void AddPubNodeInfo(){
+    curnid=++table[pubtopic].pubnodes[0];
+    table[pubtopic].pubnodes[curnid]=node;
+}
+
+void AddSubNodeInfo(){
+    curnid=++table[subtopic].subnodes[0];
+    table[subtopic].subnodes[curnid]=node;
+}
+</declaration>
+		<location id="id0" x="289" y="-850">
+			<name x="279" y="-884">S1</name>
+		</location>
+		<location id="id1" x="289" y="-1079">
+			<name x="279" y="-1113">S2</name>
+			<committed/>
+		</location>
+		<location id="id2" x="289" y="-637">
+			<name x="279" y="-671">S3</name>
+			<committed/>
+		</location>
+		<location id="id3" x="136" y="-960">
+			<name x="126" y="-994">S4</name>
+			<committed/>
+		</location>
+		<location id="id4" x="459" y="-960">
+			<name x="449" y="-994">S5</name>
+			<committed/>
+		</location>
+		<location id="id5" x="212" y="-807">
+			<name x="202" y="-841">S0</name>
+			<committed/>
+		</location>
+		<init ref="id5"/>
+		<transition>
+			<source ref="id5"/>
+			<target ref="id0"/>
+			<label kind="assignment" x="230" y="-828">Initialize()</label>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id0"/>
+			<label kind="select" x="612" y="-833">i:int[1,Nn]</label>
+			<label kind="guard" x="484" y="-816">(table[pubtopic].pubtopic_status==0)&amp;&amp;
+(table[pubtopic].subtopic_status==1)</label>
+			<label kind="synchronisation" x="408" y="-782">publisherUpdate[table[pubtopic].subnodes[i]][pubtopic]!</label>
+			<label kind="assignment" x="518" y="-765">AddPubTopic(),AddPubNodeInfo()</label>
+			<nail x="637" y="-637"/>
+			<nail x="637" y="-841"/>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id0"/>
+			<label kind="guard" x="331" y="-722">(table[pubtopic].pubtopic_status==1)&amp;&amp;
+(table[pubtopic].subtopic_status==0)</label>
+			<label kind="assignment" x="408" y="-680">AddPubNodeInfo()</label>
+			<nail x="459" y="-646"/>
+			<nail x="459" y="-841"/>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id0"/>
+			<label kind="guard" x="-119" y="-816">(table[pubtopic].pubtopic_status==0)&amp;&amp;
+(table[pubtopic].subtopic_status==0)</label>
+			<label kind="assignment" x="-110" y="-773">AddPubTopic(),AddPubNodeInfo()</label>
+			<nail x="-25" y="-637"/>
+			<nail x="-25" y="-841"/>
+		</transition>
+		<transition>
+			<source ref="id2"/>
+			<target ref="id0"/>
+			<label kind="select" x="110" y="-739">i:int[1,Nn]</label>
+			<label kind="guard" x="34" y="-722">(table[pubtopic].pubtopic_status==1)&amp;&amp;
+(table[pubtopic].subtopic_status==1)</label>
+			<label kind="synchronisation" x="-34" y="-688">publisherUpdate[table[pubtopic].subnodes[i]][pubtopic]!</label>
+			<label kind="assignment" x="76" y="-671">AddPubNodeInfo()</label>
+			<nail x="136" y="-646"/>
+			<nail x="136" y="-841"/>
+		</transition>
+		<transition>
+			<source ref="id0"/>
+			<target ref="id2"/>
+			<label kind="select" x="229" y="-790">i:int[1,Nn],j:int[1,Nt]</label>
+			<label kind="synchronisation" x="229" y="-773">registerPublisher[i][j]?</label>
+			<label kind="assignment" x="229" y="-756">ExecuteP(i,j)</label>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id0"/>
+			<label kind="guard" x="484" y="-986">(table[subtopic].pubtopic_status==0)&amp;&amp;
+(table[subtopic].subtopic_status==1)</label>
+			<label kind="assignment" x="552" y="-943">AddSubNodeInfo()</label>
+			<nail x="637" y="-1079"/>
+			<nail x="637" y="-858"/>
+		</transition>
+		<transition>
+			<source ref="id4"/>
+			<target ref="id0"/>
+			<label kind="synchronisation" x="306" y="-892">publisherUpdate[table[subtopic].subnodes[curnid]][subtopic]!</label>
+			<nail x="459" y="-858"/>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id4"/>
+			<label kind="guard" x="357" y="-1062">(table[subtopic].pubtopic_status==1)&amp;&amp;
+(table[subtopic].subtopic_status==0)</label>
+			<label kind="assignment" x="357" y="-1020">AddSubTopic(),AddSubNodeInfo()</label>
+			<nail x="459" y="-1071"/>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id0"/>
+			<label kind="guard" x="-119" y="-994">(table[subtopic].pubtopic_status==0)&amp;&amp;
+(table[subtopic].subtopic_status==0)</label>
+			<label kind="assignment" x="-119" y="-952">AddSubTopic(),AddSubNodeInfo()</label>
+			<nail x="-25" y="-1079"/>
+			<nail x="-25" y="-858"/>
+		</transition>
+		<transition>
+			<source ref="id3"/>
+			<target ref="id0"/>
+			<label kind="synchronisation" x="-51" y="-909">publisherUpdate[table[subtopic].subnodes[curnid]][subtopic]!</label>
+			<nail x="136" y="-858"/>
+		</transition>
+		<transition>
+			<source ref="id1"/>
+			<target ref="id3"/>
+			<label kind="guard" x="34" y="-1062">(table[subtopic].pubtopic_status==1)&amp;&amp;
+(table[subtopic].subtopic_status==1)</label>
+			<label kind="assignment" x="68" y="-1020">AddSubNodeInfo()</label>
+			<nail x="136" y="-1071"/>
+		</transition>
+		<transition>
+			<source ref="id0"/>
+			<target ref="id1"/>
+			<label kind="select" x="229" y="-994">i:int[1,Nn],j:int[1,Nt]</label>
+			<label kind="synchronisation" x="229" y="-977">registerSubscriber[i][j]?</label>
+			<label kind="assignment" x="229" y="-960">ExecuteS(i,j)</label>
+		</transition>
+	</template>
+	<template>
+		<name x="5" y="5">Node</name>
+		<parameter>const int[1,3] node, const int[0,4] action, const int[1,2] topic</parameter>
+		<declaration>// Place local declarations here.
+//int topic1=1;
+//int Qp;//Qp表示发送队列状态 0:未生成；1：生成；2：参数入队
+
+//int pubtopiclist[Nt];
+//int subtopiclist[Nt];
+//int flag_p=0,flag_s=0;
+
+bool Belong(int e,int list[Nt]){
+     for(i : int[0,Nt-1])
+    {
+        if(e==list[i])
+        return true;
+    }
+    return false;
+}
+
+void CreateA(int t,int&amp; q){
+    q=1;
+    pubtopiclist[node][flag_p[node]]=t;
+    flag_p[node]++;
+}
+
+void CreateS(int t,int&amp; q){
+    q=1;
+    subtopiclist[node][flag_s[node]]=t;
+    flag_s[node]++;
+}
+
+</declaration>
+		<location id="id6" x="-297" y="-76">
+			<name x="-307" y="-110">S4</name>
+			<committed/>
+		</location>
+		<location id="id7" x="-399" y="25">
+			<name x="-433" y="17">S3</name>
+			<committed/>
+		</location>
+		<location id="id8" x="153" y="0">
+			<name x="169" y="-8">S2</name>
+			<committed/>
+		</location>
+		<location id="id9" x="42" y="-76">
+			<name x="10" y="-84">S1</name>
+			<committed/>
+		</location>
+		<location id="id10" x="-144" y="128">
+			<name x="-176" y="120">S0</name>
+		</location>
+		<init ref="id10"/>
+		<transition>
+			<source ref="id7"/>
+			<target ref="id10"/>
+			<label kind="guard" x="-476" y="102">Belong(topic,subtopiclist[node])==true</label>
+			<nail x="-391" y="76"/>
+			<nail x="-229" y="144"/>
+		</transition>
+		<transition>
+			<source ref="id9"/>
+			<target ref="id10"/>
+			<label kind="guard" x="-238" y="-51">Belong(topic,pubtopiclist[node])==true</label>
+			<nail x="-34" y="-59"/>
+			<nail x="-119" y="34"/>
+		</transition>
+		<transition>
+			<source ref="id10"/>
+			<target ref="id10"/>
+			<label kind="guard" x="-262" y="212">action==4</label>
+			<label kind="synchronisation" x="-263" y="229">spinOnce[topic]!</label>
+			<nail x="-204" y="272"/>
+			<nail x="-280" y="221"/>
+		</transition>
+		<transition>
+			<source ref="id6"/>
+			<target ref="id10"/>
+			<label kind="synchronisation" x="-306" y="8">subscribe[node][topic]!</label>
+		</transition>
+		<transition>
+			<source ref="id7"/>
+			<target ref="id6"/>
+			<label kind="guard" x="-510" y="-42">Belong(topic,subtopiclist[node])==false</label>
+			<label kind="assignment" x="-510" y="-25">CreateS(topic,Qs[node][topic])</label>
+		</transition>
+		<transition>
+			<source ref="id10"/>
+			<target ref="id7"/>
+			<label kind="guard" x="-331" y="51">action==2</label>
+		</transition>
+		<transition>
+			<source ref="id10"/>
+			<target ref="id10"/>
+			<label kind="guard" x="-59" y="204">action==3&amp;&amp;Belong(topic,pubtopiclist[node])
+&amp;&amp;Belong(topic,contopiclistP[node])==true</label>
+			<label kind="synchronisation" x="-59" y="246">publish[node][topic]!</label>
+			<nail x="0" y="229"/>
+			<nail x="-68" y="272"/>
+		</transition>
+		<transition>
+			<source ref="id8"/>
+			<target ref="id10"/>
+			<label kind="synchronisation" x="0" y="42">advertise[node][topic]!</label>
+		</transition>
+		<transition>
+			<source ref="id9"/>
+			<target ref="id8"/>
+			<label kind="guard" x="25" y="-51">Belong(topic,pubtopiclist[node])==false</label>
+			<label kind="assignment" x="25" y="-34">CreateA(topic,Qp[node][topic])</label>
+		</transition>
+		<transition>
+			<source ref="id10"/>
+			<target ref="id9"/>
+			<label kind="guard" x="-102" y="34">action==1</label>
+		</transition>
+	</template>
+	<template>
+		<name>TopicManager</name>
+		<parameter>const int[1,3] node</parameter>
+		<declaration>
+//typedef int[0,1] req_id;
+int localsublist[Nt];
+int localpublist[Nt];
+int flag_p=0,flag_s=0;
+
+bool found=false;
+bool Typeinter[Nt+1],Typeintra[Nt+1];//0:intraprocess; 1:transport
+int tid;
+int reqnode;
+int advt,pubt,subt;
+
+void LookupLocalsubs(int t){
+    advt=t;
+    localpublist[flag_p]=t;
+    flag_p++;
+    for(i:int[0,Nt-1])
+    {
+        if(localsublist[i]==t)
+        {
+            found=true;
+            return;
+        }
+    }
+    found=false;
+}
+
+void LookupLocalpubs(int t){
+    subt=t;
+    localsublist[flag_s]=t;
+    flag_s++;
+    for(i:int[0,Nt-1])
+    {
+        if(localpublist[i]==t)
+        {
+            found=true;
+            return;
+        }
+    }
+    found=false;
+}
+
+void GetPublishType(int t){
+    pubt=t;
+    for(i:int[0,Nt-1])
+    {
+        if(localsublist[i]==t)
+        {
+            Typeintra[pubt]=true;
+        }
+    }
+    Typeinter[pubt]=true;
+}
+
+void MarkReq(int n){
+    reqnode=n;
+}
+
+void UpdateContopics(int t){
+    contopiclistP[node][flag_c[node]]=t;
+    subt =t;
+    flag_c[node]++;
+}
+</declaration>
+		<location id="id11" x="-382" y="76">
+			<name x="-399" y="42">S0</name>
+		</location>
+		<location id="id12" x="-510" y="-127">
+			<name x="-520" y="-161">S3</name>
+			<committed/>
+		</location>
+		<location id="id13" x="-144" y="-17">
+			<name x="-154" y="-51">S1</name>
+			<committed/>
+		</location>
+		<location id="id14" x="-136" y="178">
+			<name x="-146" y="144">S2</name>
+			<committed/>
+		</location>
+		<location id="id15" x="-612" y="85">
+			<name x="-638" y="59">S5</name>
+			<committed/>
+		</location>
+		<location id="id16" x="-510" y="272">
+			<name x="-544" y="264">S6</name>
+			<committed/>
+		</location>
+		<location id="id17" x="-195" y="-127">
+			<name x="-205" y="-161">S4</name>
+			<committed/>
+		</location>
+		<location id="id18" x="-170" y="272">
+			<name x="-180" y="238">S7</name>
+			<committed/>
+		</location>
+		<init ref="id11"/>
+		<transition>
+			<source ref="id18"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="-357" y="170">registerSubscriber[node][subt]!</label>
+		</transition>
+		<transition>
+			<source ref="id16"/>
+			<target ref="id18"/>
+			<label kind="guard" x="-433" y="255">found==true</label>
+			<label kind="synchronisation" x="-433" y="272">addLocalConnection[node][subt]!</label>
+		</transition>
+		<transition>
+			<source ref="id17"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="-382" y="-17">registerPublisher[node][advt]!</label>
+		</transition>
+		<transition>
+			<source ref="id12"/>
+			<target ref="id17"/>
+			<label kind="guard" x="-450" y="-144">found==true</label>
+			<label kind="synchronisation" x="-450" y="-127">addLocalConnection[node][advt]!</label>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id14"/>
+			<label kind="guard" x="-161" y="25">Typeintra[pubt]==true</label>
+			<label kind="assignment" x="-153" y="42">nocopy[pubt]=true</label>
+			<nail x="-110" y="25"/>
+			<nail x="-110" y="119"/>
+		</transition>
+		<transition>
+			<source ref="id16"/>
+			<target ref="id11"/>
+			<label kind="guard" x="-476" y="204">found==false</label>
+			<label kind="synchronisation" x="-484" y="221">registerSubscriber[node][subt]!</label>
+			<nail x="-450" y="229"/>
+			<nail x="-382" y="127"/>
+		</transition>
+		<transition>
+			<source ref="id11"/>
+			<target ref="id16"/>
+			<label kind="select" x="-561" y="144">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="-561" y="161">subscribe[node][i]?</label>
+			<label kind="assignment" x="-561" y="178">LookupLocalpubs(i)</label>
+			<nail x="-442" y="119"/>
+			<nail x="-501" y="212"/>
+		</transition>
+		<transition>
+			<source ref="id15"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="-595" y="93">agree[node][reqnode][subt]!</label>
+			<nail x="-586" y="110"/>
+			<nail x="-450" y="110"/>
+		</transition>
+		<transition>
+			<source ref="id11"/>
+			<target ref="id15"/>
+			<label kind="select" x="-603" y="8">i:int[1,Nn],j:int[1,Nt]</label>
+			<label kind="synchronisation" x="-603" y="25">xmlrpcRequest[i][node][j]?</label>
+			<label kind="assignment" x="-603" y="42">MarkReq(i),UpdateContopics(j)</label>
+			<nail x="-450" y="59"/>
+			<nail x="-586" y="59"/>
+		</transition>
+		<transition>
+			<source ref="id14"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="-331" y="102">pub_publish[node][pubt]!</label>
+		</transition>
+		<transition>
+			<source ref="id13"/>
+			<target ref="id14"/>
+			<label kind="guard" x="-221" y="68">Typeinter[pubt]==true</label>
+			<label kind="assignment" x="-221" y="85">serialize[pubt]=true</label>
+			<nail x="-170" y="25"/>
+			<nail x="-170" y="119"/>
+		</transition>
+		<transition>
+			<source ref="id11"/>
+			<target ref="id13"/>
+			<label kind="select" x="-340" y="34">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="-340" y="51">publish[node][i]?</label>
+			<label kind="assignment" x="-340" y="68">GetPublishType(i)</label>
+		</transition>
+		<transition>
+			<source ref="id12"/>
+			<target ref="id11"/>
+			<label kind="guard" x="-476" y="-85">found==false</label>
+			<label kind="synchronisation" x="-476" y="-68">registerPublisher[node][advt]!</label>
+			<nail x="-450" y="-93"/>
+			<nail x="-382" y="17"/>
+		</transition>
+		<transition>
+			<source ref="id11"/>
+			<target ref="id12"/>
+			<label kind="select" x="-552" y="-51">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="-552" y="-34">advertise[node][i]?</label>
+			<label kind="assignment" x="-552" y="-17">LookupLocalsubs(i)</label>
+			<nail x="-433" y="42"/>
+			<nail x="-510" y="-76"/>
+		</transition>
+	</template>
+	<template>
+		<name>Publication</name>
+		<parameter>const int[1,3] node</parameter>
+		<declaration>int pubt;
+
+void EnqueueMessage(int &amp;Q, int &amp;m){
+    Q=2;
+    m=1;
+    serialize[pubt]=false;
+}
+
+void EnqueueMessage1(int &amp;m){
+    m=0;
+    nocopy[pubt]=false;
+}</declaration>
+		<location id="id19" x="-127" y="-8">
+			<name x="-137" y="-42">S0</name>
+		</location>
+		<location id="id20" x="59" y="-8">
+			<name x="49" y="-42">S1</name>
+			<committed/>
+		</location>
+		<location id="id21" x="280" y="-8">
+			<name x="270" y="-42">S2</name>
+			<committed/>
+		</location>
+		<init ref="id19"/>
+		<transition>
+			<source ref="id21"/>
+			<target ref="id19"/>
+			<label kind="guard" x="-42" y="42">serialize[pubt]==true</label>
+			<label kind="synchronisation" x="-41" y="59">pub_enqueue[node][pubt]!</label>
+			<label kind="assignment" x="-41" y="76">EnqueueMessage(Qp[node][pubt],msg[pubt])</label>
+			<nail x="280" y="93"/>
+			<nail x="-127" y="93"/>
+		</transition>
+		<transition>
+			<source ref="id21"/>
+			<target ref="id19"/>
+			<label kind="guard" x="-17" y="-144">serialize[pubt]==false</label>
+			<nail x="280" y="-119"/>
+			<nail x="-127" y="-119"/>
+		</transition>
+		<transition>
+			<source ref="id20"/>
+			<target ref="id21"/>
+			<label kind="guard" x="93" y="8">nocopy[pubt]==false</label>
+			<nail x="93" y="34"/>
+			<nail x="246" y="34"/>
+		</transition>
+		<transition>
+			<source ref="id20"/>
+			<target ref="id21"/>
+			<label kind="guard" x="68" y="-102">nocopy[pubt]==true</label>
+			<label kind="synchronisation" x="68" y="-85">do_nocopy[pubt]!</label>
+			<label kind="assignment" x="68" y="-68">EnqueueMessage1(msg[pubt])</label>
+			<nail x="93" y="-42"/>
+			<nail x="246" y="-42"/>
+		</transition>
+		<transition>
+			<source ref="id19"/>
+			<target ref="id20"/>
+			<label kind="select" x="-93" y="-68">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="-93" y="-51">pub_publish[node][i]?</label>
+			<label kind="assignment" x="-93" y="-34">pubt:=i</label>
+		</transition>
+	</template>
+	<template>
+		<name>Subscription</name>
+		<parameter>const int[1,3] node</parameter>
+		<declaration>int pubnodelist[Nn];
+int pubnodelist_b[Nn];//备份的列表，用来作比较
+int agreenode;
+int len = 0;
+int subt=0,msgt=0;
+
+void Initialize(){
+    for(i:int[0,Nn-1])
+    {
+        pubnodelist[i]=0;
+        pubnodelist_b[i]=0;
+    }
+}
+void PubUpdate(int t){
+    subt=t;
+    for(i:int[1,Nn])
+    {
+        if(table[t].pubnodes[i]!=0)
+        {
+            pubnodelist[len]=table[t].pubnodes[i];
+            len++;
+        }
+    }
+    len=0;//用完置0
+}
+
+bool HasNewPub(){
+    for(i:int[0,Nn-1])
+    {
+        if(pubnodelist[i]!=pubnodelist_b[i])
+           return true;
+    }
+    return false;
+}
+
+
+void Updatelist(){
+     for(i:int[0,Nn-1])
+    {
+        pubnodelist_b[i]=pubnodelist[i];//同时把用来作比较的备份的列表更新
+    }
+}
+
+void MarkAgree(int n){
+    agreenode=n;
+}
+
+void MarkMsg(int t){
+    msgt=t;
+}
+
+void EnqueueMsg(int &amp;Q, int &amp;m){
+    Q=2;
+    m=4;
+}
+
+void callAvailable(int &amp;m){
+    m=5;
+}
+
+void UpdateContopics(){
+    contopiclistS[node][flag_c[node]]=subt;//该节点第flag_c[node]个连接的话题是subt
+    flag_c[node]++;
+}</declaration>
+		<location id="id22" x="297" y="-127">
+			<name x="287" y="-161">S7</name>
+		</location>
+		<location id="id23" x="85" y="-8">
+			<name x="75" y="-42">S6</name>
+		</location>
+		<location id="id24" x="136" y="119">
+			<name x="126" y="85">S5</name>
+			<committed/>
+		</location>
+		<location id="id25" x="272" y="221">
+			<name x="262" y="187">S4</name>
+			<committed/>
+		</location>
+		<location id="id26" x="425" y="323">
+			<name x="415" y="289">S3</name>
+		</location>
+		<location id="id27" x="569" y="221">
+			<name x="559" y="187">S2</name>
+			<committed/>
+		</location>
+		<location id="id28" x="417" y="119">
+			<name x="407" y="85">S1</name>
+		</location>
+		<location id="id29" x="348" y="68">
+			<name x="338" y="34">S0</name>
+			<committed/>
+		</location>
+		<init ref="id29"/>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id27"/>
+			<label kind="select" x="518" y="-34">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="518" y="-17">publisherUpdate[node][i]?</label>
+			<label kind="assignment" x="518" y="0">PubUpdate(i)</label>
+			<nail x="569" y="-127"/>
+			<nail x="637" y="153"/>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id24"/>
+			<label kind="select" x="144" y="-25">i:int[0,Nt-1]</label>
+			<label kind="synchronisation" x="144" y="-8">msg_transport[contopiclistS[node][i]]?</label>
+			<label kind="assignment" x="144" y="8">MarkMsg(contopiclistS[node][i])</label>
+		</transition>
+		<transition>
+			<source ref="id28"/>
+			<target ref="id28"/>
+			<label kind="select" x="433" y="59">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="425" y="76">addLocalConnection[node][i]?</label>
+			<nail x="493" y="119"/>
+			<nail x="476" y="67"/>
+		</transition>
+		<transition>
+			<source ref="id28"/>
+			<target ref="id22"/>
+			<label kind="select" x="365" y="-76">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="365" y="-59">do_nocopy[i]?</label>
+			<nail x="408" y="-93"/>
+		</transition>
+		<transition>
+			<source ref="id22"/>
+			<target ref="id22"/>
+			<label kind="select" x="255" y="-229">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="255" y="-212">spinOnce[i]?</label>
+			<label kind="assignment" x="255" y="-195">callAvailable(msg[i])</label>
+			<nail x="263" y="-178"/>
+			<nail x="331" y="-178"/>
+		</transition>
+		<transition>
+			<source ref="id23"/>
+			<target ref="id22"/>
+			<label kind="select" x="51" y="-102">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="51" y="-119">handleMsg[node][i]?</label>
+			<label kind="assignment" x="51" y="-85">EnqueueMsg(Qs[node][i],msg[i])</label>
+			<nail x="136" y="-127"/>
+		</transition>
+		<transition>
+			<source ref="id24"/>
+			<target ref="id23"/>
+			<label kind="synchronisation" x="25" y="34">msg_arrive[node][msgt]!</label>
+		</transition>
+		<transition>
+			<source ref="id28"/>
+			<target ref="id24"/>
+			<label kind="select" x="170" y="85">i:int[0,Nt-1]</label>
+			<label kind="synchronisation" x="170" y="102">msg_transport[contopiclistS[node][i]]?</label>
+			<label kind="assignment" x="170" y="119">MarkMsg(contopiclistS[node][i])</label>
+		</transition>
+		<transition>
+			<source ref="id25"/>
+			<target ref="id28"/>
+			<label kind="synchronisation" x="221" y="153">negotiateDone[node][agreenode]!</label>
+			<label kind="assignment" x="221" y="170">UpdateContopics()</label>
+		</transition>
+		<transition>
+			<source ref="id26"/>
+			<target ref="id25"/>
+			<label kind="select" x="238" y="246">i:int[0,Nn-1],j:int[1,Nt]</label>
+			<label kind="synchronisation" x="238" y="262">agree[pubnodelist[i]][node][j]?</label>
+			<label kind="assignment" x="238" y="279">MarkAgree(pubnodelist[i])</label>
+		</transition>
+		<transition>
+			<source ref="id29"/>
+			<target ref="id28"/>
+			<label kind="assignment" x="331" y="76">Initialize()</label>
+		</transition>
+		<transition>
+			<source ref="id27"/>
+			<target ref="id26"/>
+			<label kind="select" x="450" y="238">i:int[0,Nn-1]</label>
+			<label kind="guard" x="450" y="255">(pubnodelist[i]!=node)&amp;&amp;HasNewPub()</label>
+			<label kind="synchronisation" x="450" y="272">xmlrpcRequest[node][pubnodelist[i]][subt]!</label>
+			<label kind="assignment" x="450" y="289">Updatelist()</label>
+		</transition>
+		<transition>
+			<source ref="id28"/>
+			<target ref="id27"/>
+			<label kind="select" x="450" y="144">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="450" y="161">publisherUpdate[node][i]?</label>
+			<label kind="assignment" x="450" y="178">PubUpdate(i)</label>
+		</transition>
+	</template>
+	<template>
+		<name>Connection</name>
+		<parameter>const int[1,3] node</parameter>
+		<declaration>int pubt=0,subt=0;
+
+void Write(int t,int&amp; m){
+    pubt=t;
+    m=2;
+}
+
+void Read(int t,int&amp; m){
+    subt=t;
+    m=3;
+}
+
+bool Belong(int e,int list[Nt]){
+     for(i : int[0,Nt-1])
+    {
+        if(e==list[i])
+        return true;
+    }
+    return false;
+}</declaration>
+		<location id="id30" x="34" y="25">
+			<name x="24" y="-9">S0</name>
+		</location>
+		<location id="id31" x="34" y="-144">
+			<name x="24" y="-178">S1</name>
+			<committed/>
+		</location>
+		<location id="id32" x="34" y="178">
+			<name x="24" y="144">S2</name>
+			<committed/>
+		</location>
+		<location id="id33" x="246" y="-59">
+			<name x="236" y="-93">S3</name>
+			<committed/>
+		</location>
+		<init ref="id30"/>
+		<transition>
+			<source ref="id33"/>
+			<target ref="id30"/>
+		</transition>
+		<transition>
+			<source ref="id31"/>
+			<target ref="id33"/>
+			<label kind="guard" x="76" y="-119">Belong(pubt,contopiclistP[node])==false</label>
+		</transition>
+		<transition>
+			<source ref="id30"/>
+			<target ref="id30"/>
+			<label kind="select" x="-178" y="-8">i:int[1,Nn]</label>
+			<label kind="synchronisation" x="-178" y="8">negotiateDone[node][i]?</label>
+			<nail x="-110" y="-25"/>
+			<nail x="-110" y="59"/>
+		</transition>
+		<transition>
+			<source ref="id32"/>
+			<target ref="id30"/>
+			<label kind="synchronisation" x="51" y="102">handleMsg[node][subt]!</label>
+			<nail x="76" y="136"/>
+			<nail x="76" y="59"/>
+		</transition>
+		<transition>
+			<source ref="id30"/>
+			<target ref="id32"/>
+			<label kind="select" x="-68" y="59">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="-68" y="76">msg_arrive[node][i]?</label>
+			<label kind="assignment" x="-68" y="93">Read(i,msg[i])</label>
+			<nail x="-8" y="59"/>
+			<nail x="-8" y="136"/>
+		</transition>
+		<transition>
+			<source ref="id31"/>
+			<target ref="id30"/>
+			<label kind="guard" x="17" y="-68">Belong(pubt,contopiclistP[node])</label>
+			<label kind="synchronisation" x="17" y="-51">msg_transport[pubt]!</label>
+			<nail x="76" y="-110"/>
+			<nail x="76" y="-25"/>
+		</transition>
+		<transition>
+			<source ref="id30"/>
+			<target ref="id31"/>
+			<label kind="select" x="-93" y="-110">i:int[1,Nt]</label>
+			<label kind="synchronisation" x="-93" y="-93">pub_enqueue[node][i]?</label>
+			<label kind="assignment" x="-93" y="-76">Write(i,msg[i])</label>
+			<nail x="-8" y="-25"/>
+			<nail x="-8" y="-110"/>
+		</transition>
+	</template>
+	<system>// Place template instantiations here.
+NodeA_a1 = Node(1,1,1);
+NodeA_p1 = Node(1,3,1);
+NodeB_s1 = Node(2,2,1);
+NodeB_a2 = Node(2,1,2);
+NodeB_p2 = Node(2,3,2);
+NodeC_s1 = Node(3,2,1);
+NodeC_s2 = Node(3,2,2);
+TM_A = TopicManager(1);
+TM_B = TopicManager(2);
+TM_C = TopicManager(3);
+Pub_A = Publication(1);
+Pub_B = Publication(2);
+Pub_C = Publication(3);
+Sub_A = Subscription(1);
+Sub_B = Subscription(2);
+Sub_C = Subscription(3);
+Con_A = Connection(1);
+Con_B = Connection(2);
+Con_C = Connection(3);
+// List one or more processes to be composed into a system.
+system Master, NodeA_a1, NodeA_p1, NodeB_s1, NodeB_a2, NodeB_p2, NodeC_s1, NodeC_s2, TM_A, TM_B, TM_C, Pub_A, Pub_B, Pub_C, Sub_A, Sub_B, Sub_C, Con_A, Con_B, Con_C;</system>
+	<queries>
+		<query>
+			<formula>E&lt;&gt;Con_A.S3</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; Pub_A.S1</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt;TM_A.S1</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>Pub_A.S1 --&gt; Sub_C.S6</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>Pub_A.S1 --&gt; Sub_B.S6</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>TM_A.S1 --&gt; Sub_B.S6</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>A[] not deadlock</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; Master.S3</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; Master.S2</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>TM_A.S1 --&gt; Sub_B.S6|Sub_C.S6</formula>
+			<comment></comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt;Con_A.S3</formula>
+			<comment></comment>
+		</query>
+	</queries>
+</nta>
